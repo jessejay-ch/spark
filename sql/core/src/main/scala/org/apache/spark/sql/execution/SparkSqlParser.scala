@@ -168,6 +168,10 @@ class SparkSqlAstBuilder extends AstBuilder {
    * }}}
    */
   override def visitSetCollation(ctx: SetCollationContext): LogicalPlan = withOrigin(ctx) {
+    val collationName = ctx.collationName.getText
+    if (!SQLConf.get.trimCollationEnabled && collationName.toUpperCase().contains("TRIM")) {
+      throw QueryCompilationErrors.trimCollationNotEnabledError()
+    }
     val key = SQLConf.DEFAULT_COLLATION.key
     SetCommand(Some(key -> Some(ctx.identifier.getText.toUpperCase(Locale.ROOT))))
   }
@@ -185,10 +189,29 @@ class SparkSqlAstBuilder extends AstBuilder {
     val key = SQLConf.SESSION_LOCAL_TIMEZONE.key
     if (ctx.interval != null) {
       val interval = parseIntervalLiteral(ctx.interval)
-      if (interval.months != 0 || interval.days != 0 ||
-        math.abs(interval.microseconds) > 18 * DateTimeConstants.MICROS_PER_HOUR ||
-        interval.microseconds % DateTimeConstants.MICROS_PER_SECOND != 0) {
-        throw QueryParsingErrors.intervalValueOutOfRangeError(ctx.interval())
+      if (interval.months != 0) {
+        throw QueryParsingErrors.intervalValueOutOfRangeError(
+          toSQLValue(interval.months),
+          ctx.interval()
+        )
+      }
+      else if (interval.days != 0) {
+        throw QueryParsingErrors.intervalValueOutOfRangeError(
+          toSQLValue(interval.days),
+          ctx.interval()
+        )
+      }
+      else if (math.abs(interval.microseconds) > 18 * DateTimeConstants.MICROS_PER_HOUR) {
+        throw QueryParsingErrors.intervalValueOutOfRangeError(
+          toSQLValue((math.abs(interval.microseconds) / DateTimeConstants.MICROS_PER_HOUR).toInt),
+          ctx.interval()
+        )
+      }
+      else if (interval.microseconds % DateTimeConstants.MICROS_PER_SECOND != 0) {
+        throw QueryParsingErrors.intervalValueOutOfRangeError(
+          toSQLValue((interval.microseconds / DateTimeConstants.MICROS_PER_SECOND).toInt),
+          ctx.interval()
+        )
       } else {
         val seconds = (interval.microseconds / DateTimeConstants.MICROS_PER_SECOND).toInt
         SetCommand(Some(key -> Some(ZoneOffset.ofTotalSeconds(seconds).toString)))
