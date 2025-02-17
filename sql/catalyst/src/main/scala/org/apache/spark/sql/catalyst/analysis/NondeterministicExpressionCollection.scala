@@ -17,26 +17,32 @@
 
 package org.apache.spark.sql.catalyst.analysis
 
+import java.util.LinkedHashMap
+
 import org.apache.spark.sql.catalyst.expressions._
 
 object NondeterministicExpressionCollection {
   def getNondeterministicToAttributes(
-      expressions: Seq[Expression]): Map[Expression, NamedExpression] = {
-    expressions
-      .filterNot(_.deterministic)
-      .flatMap { expr =>
+      expressions: Seq[Expression]): LinkedHashMap[Expression, NamedExpression] = {
+    val nonDeterministicToAttributes = new LinkedHashMap[Expression, NamedExpression]
+
+    for (expr <- expressions) {
+      if (!expr.deterministic) {
         val leafNondeterministic = expr.collect {
-          case n: Nondeterministic => n
+          case nondeterministicExpr: Nondeterministic => nondeterministicExpr
           case udf: UserDefinedExpression if !udf.deterministic => udf
         }
-        leafNondeterministic.distinct.map { e =>
-          val ne = e match {
-            case n: NamedExpression => n
-            case _ => Alias(e, "_nondeterministic")()
+
+        for (nondeterministicExpr <- leafNondeterministic.distinct) {
+          val namedExpression = nondeterministicExpr match {
+            case namedExpression: NamedExpression => namedExpression
+            case _ => Alias(nondeterministicExpr, "_nondeterministic")()
           }
-          e -> ne
+          nonDeterministicToAttributes.put(nondeterministicExpr, namedExpression)
         }
       }
-      .toMap
+    }
+
+    nonDeterministicToAttributes
   }
 }
